@@ -1,0 +1,6 @@
+﻿google-adk
+google-genai
+requests
+uvicorn
+python-dotenv
+pytest

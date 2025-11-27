@@ -1,0 +1,19 @@
+﻿# Environment files
+.env
+.env.*
+!.env.example
+
+# Python
+__pycache__/
+*.pyc
+*.pyo
+
+# OS files
+.DS_Store
+
+# VSCode
+.vscode/
+
+# Logs / temp
+*.log
+adk_state/

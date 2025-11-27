@@ -17,3 +17,4 @@ __pycache__/
 # Logs / temp
 *.log
 adk_state/
+venv/

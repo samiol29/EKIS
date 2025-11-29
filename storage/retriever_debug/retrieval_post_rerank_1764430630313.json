@@ -1,0 +1,21 @@
+{
+  "query": "waterfall model",
+  "time_utc": "2025-11-29T15:37:10.313800Z",
+  "post_rerank": [
+    {
+      "doc_id": "b97a5ce0-c8d1-4916-abfe-d377da8a91bb",
+      "score": 9.445808410644531,
+      "excerpt": "Classical Waterfall Model The classical waterfall model is a sequential software development process\nwhere progress flows in one direction: requirements → design → implementation → testing →\ndeployment → maintenance. Key Characteristics: - Linear, phase-based approach -\nDocumentation-heavy - No feed..."
+    },
+    {
+      "doc_id": "eadeaa25-c115-46af-b04a-6e3632386872",
+      "score": -10.443195343017578,
+      "excerpt": "eadeaa25-c115-46af-b04a-6e3632386872"
+    },
+    {
+      "doc_id": "779c4586-002a-4f93-b62d-52b10b9ab1fe",
+      "score": -10.760892868041992,
+      "excerpt": "779c4586-002a-4f93-b62d-52b10b9ab1fe"
+    }
+  ]
+}

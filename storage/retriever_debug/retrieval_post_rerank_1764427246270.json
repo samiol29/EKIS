@@ -1,0 +1,21 @@
+{
+  "query": "test query",
+  "time_utc": "2025-11-29T14:40:46.270754Z",
+  "post_rerank": [
+    {
+      "doc_id": "779c4586-002a-4f93-b62d-52b10b9ab1fe",
+      "score": 0.010264817625284195,
+      "excerpt": "779c4586-002a-4f93-b62d-52b10b9ab1fe"
+    },
+    {
+      "doc_id": "eadeaa25-c115-46af-b04a-6e3632386872",
+      "score": 0.010264817625284195,
+      "excerpt": "eadeaa25-c115-46af-b04a-6e3632386872"
+    },
+    {
+      "doc_id": "b97a5ce0-c8d1-4916-abfe-d377da8a91bb",
+      "score": 0.010264817625284195,
+      "excerpt": "b97a5ce0-c8d1-4916-abfe-d377da8a91bb"
+    }
+  ]
+}

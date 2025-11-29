@@ -1,0 +1,32 @@
+{
+  "query": "waterfall model",
+  "time_utc": "2025-11-29T15:37:10.270006Z",
+  "raw_results": [
+    {
+      "doc_id": "779c4586-002a-4f93-b62d-52b10b9ab1fe",
+      "score": 0.5813330411911011
+    },
+    {
+      "doc_id": "eadeaa25-c115-46af-b04a-6e3632386872",
+      "score": 0.5813330411911011
+    },
+    {
+      "doc_id": "b97a5ce0-c8d1-4916-abfe-d377da8a91bb",
+      "score": 0.5813330411911011
+    }
+  ],
+  "excerpts": [
+    {
+      "doc_id": "779c4586-002a-4f93-b62d-52b10b9ab1fe",
+      "excerpt": "779c4586-002a-4f93-b62d-52b10b9ab1fe"
+    },
+    {
+      "doc_id": "eadeaa25-c115-46af-b04a-6e3632386872",
+      "excerpt": "eadeaa25-c115-46af-b04a-6e3632386872"
+    },
+    {
+      "doc_id": "b97a5ce0-c8d1-4916-abfe-d377da8a91bb",
+      "excerpt": "Classical Waterfall Model The classical waterfall model is a sequential software development process\nwhere progress flows in one direction: requirements → design → implementation → testing →\ndeployment → maintenance. Key Characteristics: - Linear, phase-based approach -\nDocumentation-heavy - No feedback loops between phases - Best suited for well-understood, stable\nrequirements Common Uses: - Military systems - Manufacturing - Large enterprise systems with fixed\nrequirements"
+    }
+  ]
+}

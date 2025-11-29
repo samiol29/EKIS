@@ -3,6 +3,7 @@
 retriever_api.py
 
 Production-minded FastAPI service to serve your EKIS retriever (Phase 4)
+(Updated: adds /v1/reindex synchronous ingestion and /v1/ingest file upload)
 """
 from __future__ import annotations
 import os
@@ -11,12 +12,14 @@ import time
 import asyncio
 import logging
 from typing import List, Optional, Dict, Any
+import uuid
 from pathlib import Path
 import datetime
+import shutil
 
 import numpy as np
 from pydantic import BaseModel, Field
-from fastapi import FastAPI, HTTPException, Request, BackgroundTasks, Depends, status
+from fastapi import FastAPI, HTTPException, Request, BackgroundTasks, Depends, status, UploadFile, File
 from fastapi.responses import JSONResponse
 from fastapi.middleware.cors import CORSMiddleware
 from starlette.middleware.base import BaseHTTPMiddleware
@@ -390,31 +393,116 @@ class APIKeyMiddleware(BaseHTTPMiddleware):
         return await call_next(request)
 
 # ---------------------------
-# Helper: prepare candidates from raw_results
+# Helpers: PDF extraction, backups, FAISS build
 # ---------------------------
-def prepare_candidates_from_raw_results(raw_results: List[tuple], retriever: RetrieverIndex, max_excerpt: int = 300):
+def extract_text_from_pdf_file(pdf_path: Path) -> str:
+    from pypdf import PdfReader
+    try:
+        reader = PdfReader(str(pdf_path))
+        pages = []
+        for p in reader.pages:
+            t = p.extract_text()
+            if t:
+                pages.append(t)
+        return "\n".join(pages).strip()
+    except Exception:
+        logger.exception("PDF extraction failed for %s", pdf_path)
+        return ""
+
+def make_backup(path: Path):
+    try:
+        if not path.exists():
+            return None
+        bdir = DATA_DIR / "backups"
+        bdir.mkdir(parents=True, exist_ok=True)
+        ts = datetime.datetime.utcnow().strftime("%Y%m%d_%H%M%S")
+        dest = bdir / f"{path.name}.backup.{ts}"
+        shutil.copy2(path, dest)
+        logger.info("Backed up %s -> %s", path, dest)
+        return dest
+    except Exception:
+        logger.exception("Backup failed for %s", path)
+        return None
+
+def normalize_vectors(arr: np.ndarray) -> np.ndarray:
+    norms = np.linalg.norm(arr, axis=1, keepdims=True) + 1e-12
+    return arr / norms
+
+def build_faiss_from_embeddings(embeddings: List[tuple], index_path: Path, dim: int):
     """
-    raw_results: list of (doc_id, score)
-    returns: list of SearchResult (safe) and a list of candidate texts (for reranker)
+    embeddings: list of (doc_id, vector (1D np.array or list))
+    Builds an IndexFlatIP (inner product on normalized vectors) and writes to disk.
+    Also returns id_map list in same order as vectors added.
     """
-    candidates = []
-    candidate_texts = []
-    for doc_id, score in raw_results:
-        doc = retriever.get(doc_id) if doc_id is not None else None
-        excerpt = None
-        meta = {}
-        if doc:
-            txt = doc.text or ""
-            excerpt = (txt[:max_excerpt] + "...") if len(txt) > max_excerpt else txt
-            meta = doc.metadata or {}
-            candidate_texts.append(safe_truncate(txt))
+    if faiss is None:
+        logger.warning("faiss is not available; writing embeddings debug file instead.")
+        debug_path = DATA_DIR / "embeddings_debug.json"
+        debug_list = [{"id": i, "vec": v.tolist() if isinstance(v, np.ndarray) else v} for i, v in embeddings]
+        with open(debug_path, "w", encoding="utf-8") as f:
+            json.dump(debug_list, f, indent=2, ensure_ascii=False)
+        logger.info("Wrote embeddings debug to %s", debug_path)
+        return [d[0] for d in embeddings]
+
+    # stack vectors
+    vecs = []
+    id_map = []
+    for doc_id, vec in embeddings:
+        v = np.asarray(vec, dtype=np.float32)
+        if v.ndim == 1:
+            vecs.append(v)
+            id_map.append(doc_id)
+        elif v.ndim == 2 and v.shape[0] == 1:
+            vecs.append(v[0])
+            id_map.append(doc_id)
         else:
-            candidate_texts.append(None)
-        candidates.append(SearchResult(id=doc_id or "", score=score, excerpt=excerpt, metadata=meta))
-    return candidates, candidate_texts
+            # flatten first row
+            vecs.append(v.reshape(-1)[:dim])
+            id_map.append(doc_id)
+
+    if len(vecs) == 0:
+        logger.warning("No embeddings passed to FAISS builder.")
+        return []
+
+    mat = np.vstack(vecs).astype(np.float32)
+    mat = normalize_vectors(mat)
+
+    # create index
+    index = faiss.IndexFlatIP(dim)  # inner-product on normalized vectors ~ cosine
+    try:
+        index.add(mat)
+        # ensure storage dir exists
+        index_path.parent.mkdir(parents=True, exist_ok=True)
+        faiss.write_index(index, str(index_path))
+        logger.info("Built FAISS index at %s (ntotal=%d)", index_path, index.ntotal)
+    except Exception:
+        logger.exception("faiss index build/write failed; writing debug embeddings instead.")
+        debug_path = DATA_DIR / "embeddings_debug.json"
+        debug_list = [{"id": id_map[i], "vec": mat[i].tolist()} for i in range(mat.shape[0])]
+        with open(debug_path, "w", encoding="utf-8") as f:
+            json.dump(debug_list, f, indent=2, ensure_ascii=False)
+        logger.info("Wrote embeddings debug to %s", debug_path)
+    return id_map
 
 # ---------------------------
-# App factory
+# Helper to write documents.json (safe) and return list
+# ---------------------------
+def write_documents_json(docs: List[Dict[str, Any]], path: Path = DOCUMENTS_PATH):
+    path.parent.mkdir(parents=True, exist_ok=True)
+    with open(path, "w", encoding="utf-8") as f:
+        json.dump(docs, f, ensure_ascii=False, indent=2)
+
+def load_documents_json(path: Path = DOCUMENTS_PATH) -> List[Dict[str, Any]]:
+    if not path.exists():
+        return []
+    with open(path, "r", encoding="utf-8") as f:
+        data = json.load(f)
+    if isinstance(data, dict):
+        # convert to list of values
+        return list(data.values())
+    return data
+
+# ---------------------------
+# App factory (keeps most of your original startup logic)
 # ---------------------------
 def create_app() -> FastAPI:
     app = FastAPI(title="EKIS Retriever API", version="1.0")
@@ -437,11 +525,7 @@ def create_app() -> FastAPI:
 
     @app.on_event("startup")
     async def startup_event():
-        logger.info("Starting EKIS retriever API...")
-
-        retriever = None
-        faiss_manager = None
-        docs_list = None
+        logger.info("Starting EKIS retriever API... (startup)")
 
         import importlib
 
@@ -466,8 +550,10 @@ def create_app() -> FastAPI:
             except Exception:
                 continue
 
+        faiss_manager = None
+        docs_list = None
+
         try:
-            # Instantiate user's FAISSIndex if available
             if faiss_mod and hasattr(faiss_mod, "FAISSIndex"):
                 kwargs = {}
                 if os.getenv("FAISS_INDEX_PATH"):
@@ -488,7 +574,6 @@ def create_app() -> FastAPI:
                     logger.exception("Failed to instantiate FAISSIndex: %s", e)
                     faiss_manager = None
 
-            # Load documents using document_store module if available
             if doc_mod:
                 for fn in ("load_documents", "read_documents", "get_documents"):
                     if hasattr(doc_mod, fn):
@@ -500,17 +585,14 @@ def create_app() -> FastAPI:
                             logger.exception("Error calling %s.%s: %s", doc_mod.__name__, fn, e)
                             docs_list = None
 
-            # Fallback: try reading storage/documents.json
+            # Fallback: read storage/documents.json
             if not docs_list:
-                # treat empty list same as missing
                 docs_path = Path(os.getenv("DOCUMENTS_JSON", Path("storage") / "documents.json"))
                 if docs_path.exists():
                     try:
                         with open(docs_path, "r", encoding="utf-8") as f:
                             loaded = json.load(f)
-                        # normalize loaded into list
                         if isinstance(loaded, dict):
-                            # dict keyed by id -> values
                             loaded_list = list(loaded.values())
                         else:
                             loaded_list = loaded
@@ -520,95 +602,56 @@ def create_app() -> FastAPI:
                         logger.exception("Failed to read %s: %s", docs_path, e)
                         docs_list = None
 
-            # If still no docs_list and we have a faiss_manager with id_map, create minimal docs
+            # Minimal docs from faiss_manager id_map
             if (not docs_list or len(docs_list) == 0) and faiss_manager is not None and getattr(faiss_manager, "id_map", None):
                 docs_list = []
                 for doc_id in faiss_manager.id_map:
-                    # create placeholder doc so retriever can return ids/excerpts
-                    docs_list.append({"id": doc_id, "text": "", "metadata": {}})                    
+                    docs_list.append({"id": doc_id, "text": "", "metadata": {}})
                 logger.info("Created minimal documents from faiss_manager.id_map (count=%d)", len(docs_list))
 
-            # Build RetrieverIndex wrapper and attach faiss internals if available
+            # Build RetrieverIndex wrapper
             retriever = RetrieverIndex(FAISS_INDEX_PATH, DOCUMENTS_PATH, EMBEDDING_DIM)
 
             if faiss_manager is not None:
                 try:
-                    # Prefer the manager's index object if present
                     if hasattr(faiss_manager, "index") and getattr(faiss_manager, "index") is not None:
                         retriever.index = faiss_manager.index
-                    # Ensure id_map alignment: prefer manager.id_map
                     if hasattr(faiss_manager, "id_map") and getattr(faiss_manager, "id_map") is not None:
                         retriever.id_map = faiss_manager.id_map
-                    # Attach persisted embeddings if the manager exposed them
                     if hasattr(faiss_manager, "embeddings") and getattr(faiss_manager, "embeddings") is not None:
                         retriever._external_embeddings = faiss_manager.embeddings
-                    # Store manager on app.state for stable access
                     app.state.faiss_manager = faiss_manager
-                    # Also store a direct reference to the faiss Index on app.state for other code paths
                     try:
                         app.state.faiss_index_object = faiss_manager.index if hasattr(faiss_manager, "index") else None
                     except Exception:
                         app.state.faiss_index_object = None
-                    logger.info(
-                        "Attached faiss_manager internals: index=%s, id_map_len=%s, embeddings=%s",
-                        type(getattr(faiss_manager, "index", None)).__name__ if getattr(faiss_manager, "index", None) is not None else None,
-                        len(getattr(faiss_manager, "id_map", [])) if getattr(faiss_manager, "id_map", None) is not None else 0,
-                        "present" if getattr(faiss_manager, "embeddings", None) is not None else "absent"
-                    )
-                except Exception as e:
-                    logger.exception("Failed to attach faiss_manager internals: %s", e)
-
-            # --- ensure retriever has a usable FAISS index: try manager.index, else try reading disk index
-            if getattr(retriever, "index", None) is None:
-                try:
-                    # prefer faiss_manager.index if available
-                    mgr_idx = getattr(faiss_manager, "index", None)
-                    if mgr_idx is not None:
-                        retriever.index = mgr_idx
-                    elif FAISS_INDEX_PATH.exists() and faiss is not None:
-                        logger.info("Attempting to read FAISS index from disk at %s", FAISS_INDEX_PATH)
-                        try:
-                            retriever.index = faiss.read_index(str(FAISS_INDEX_PATH))
-                            logger.info("Loaded faiss index into retriever from disk.")
-                        except Exception as e:
-                            logger.exception("Failed to read faiss index from disk: %s", e)
+                    logger.info("Attached faiss_manager internals.")
                 except Exception:
-                    logger.exception("Error while attaching fallback FAISS index to retriever.")
+                    logger.exception("Failed to attach faiss_manager internals.")
 
-            # -----------------------------
-            # Populate retriever.documents from docs_list (robust text extraction)
-            # -----------------------------
+            # populate retriever.documents from docs_list
             def _extract_text_from_doc_obj(d):
-                """
-                Best-effort extraction of human text from a document object.
-                Looks for common fields and falls back to joining short string fields.
-                """
                 if d is None:
                     return ""
                 if isinstance(d, str):
                     return d
-                # prefer explicit fields
                 for candidate in ("text", "content", "body", "document", "doc_text"):
                     if isinstance(d, dict) and candidate in d and isinstance(d[candidate], str) and d[candidate].strip():
                         return d[candidate].strip()
-                # sometimes text is nested under 'fields' or similar
                 if isinstance(d, dict):
                     for candidate in ("fields", "data"):
                         if candidate in d and isinstance(d[candidate], dict):
                             for k,v in d[candidate].items():
                                 if isinstance(v, str) and v.strip():
                                     return v.strip()
-                # fallback: join short string values from the dict
                 if isinstance(d, dict):
                     parts = []
                     for v in d.values():
                         if isinstance(v, str) and 0 < len(v) < 8000:
                             parts.append(v.strip())
                     if parts:
-                        # prefer longer joined string but keep reasonable size
                         joined = " ".join(parts)
                         return joined if len(joined) < 20000 else joined[:20000]
-                # last resort: JSON-dump
                 try:
                     return json.dumps(d, ensure_ascii=False)
                 except Exception:
@@ -617,79 +660,55 @@ def create_app() -> FastAPI:
             docs_dict = {}
             if docs_list:
                 for d in docs_list:
-                    if isinstance(d, Document):
-                        doc = d
-                    else:
-                        # determine doc_id from a few possible keys
+                    # determine id
+                    if isinstance(d, dict):
                         doc_id = None
-                        if isinstance(d, dict):
-                            for key in ("id", "doc_id", "uuid", "filename"):
-                                v = d.get(key)
-                                if v:
-                                    doc_id = str(v)
+                        for key in ("id", "doc_id", "uuid", "filename"):
+                            v = d.get(key)
+                            if v:
+                                doc_id = str(v)
+                                break
+                        if not doc_id:
+                            # try to find plausible id in values
+                            for k,v in d.items():
+                                if isinstance(v, str) and len(v) == 36 and "-" in v:
+                                    doc_id = v
                                     break
-                        # if still None, try to derive from content or skip
                         if not doc_id:
-                            # try to find any plausible id in dict values
-                            if isinstance(d, dict):
-                                for k,v in d.items():
-                                    if isinstance(v, str) and len(v) == 36 and "-" in v:
-                                        doc_id = v
-                                        break
-                        if not doc_id:
-                            # skip documents with no id
                             logger.debug("Skipping document with no id: %s", safe_truncate(str(d)))
                             continue
-                        # extract text robustly
                         text = _extract_text_from_doc_obj(d)
-                        # metadata: prefer 'metadata' or everything else except text/id
                         metadata = {}
-                        if isinstance(d, dict):
-                            if "metadata" in d and isinstance(d["metadata"], dict):
-                                metadata = d["metadata"]
-                            else:
-                                # include other fields as metadata, but avoid huge text fields
-                                for k,v in d.items():
-                                    if k in ("id","doc_id","text","content","body","document","doc_text"):
-                                        continue
-                                    # only include small primitives
-                                    if isinstance(v, (str,int,float,bool)):
-                                        metadata[k] = v
+                        if "metadata" in d and isinstance(d["metadata"], dict):
+                            metadata = d["metadata"]
+                        else:
+                            for k,v in d.items():
+                                if k in ("id","doc_id","text","content","body","document","doc_text"):
+                                    continue
+                                if isinstance(v, (str,int,float,bool)):
+                                    metadata[k] = v
                         doc = Document(id=doc_id, text=text, metadata=metadata)
+                    else:
+                        # fallback: convert to string
+                        doc = Document(id=str(hash(str(d))), text=_extract_text_from_doc_obj(d), metadata={})
                     docs_dict[doc.id] = doc
 
             retriever.documents = docs_dict
-
-
-            # If id_map missing, build from documents order
             if not getattr(retriever, "id_map", None):
                 retriever.id_map = list(docs_dict.keys())
 
-            # Validate FAISS ntotal vs id_map if index present
-            try:
-                if retriever.index is not None:
-                    faiss_ntotal = retriever.index.ntotal
-                    if faiss_ntotal != len(retriever.id_map):
-                        logger.warning("FAISS ntotal (%d) != id_map length (%d). This may indicate a mismatch.", faiss_ntotal, len(retriever.id_map))
-                    else:
-                        logger.info("FAISS ntotal matches id_map length (%d).", faiss_ntotal)
-            except Exception:
-                logger.debug("Couldn't validate FAISS ntotal vs id_map (faiss missing or index incompatible).")
-
-            # --- Force-load FAISS index from disk into retriever if possible (ensures TestClient sees it) ---
+            # defensive FAISS attach from disk if needed
             try:
                 if getattr(retriever, "index", None) is None:
-                    # first prefer any manager-provided index
                     mgr_idx = getattr(faiss_manager, "index", None) if 'faiss_manager' in locals() else None
                     if mgr_idx is not None:
                         retriever.index = mgr_idx
-                        logger.info("Attached faiss_manager.index to retriever (from memory).")
+                        logger.info("Attached faiss_manager.index to retriever (startup).")
                     else:
-                        # then try reading the canonical disk path
                         if FAISS_INDEX_PATH and Path(FAISS_INDEX_PATH).exists() and faiss is not None:
                             try:
                                 retriever.index = faiss.read_index(str(FAISS_INDEX_PATH))
-                                logger.info("Loaded FAISS index from disk into retriever: %s", FAISS_INDEX_PATH)
+                                logger.info("Loaded FAISS index from disk into retriever (startup).")
                             except Exception as e:
                                 logger.exception("Failed to read FAISS index from disk: %s", e)
                         else:
@@ -701,7 +720,6 @@ def create_app() -> FastAPI:
 
         except Exception as e:
             logger.info("Could not initialize user's FAISSIndex or documents (falling back): %s", e)
-            # fallback to original
             try:
                 retriever = RetrieverIndex(FAISS_INDEX_PATH, DOCUMENTS_PATH, EMBEDDING_DIM)
                 retriever.load()
@@ -724,11 +742,9 @@ def create_app() -> FastAPI:
                 for t in texts:
                     emb = None
                     try:
-                        # prefer manager.embed(str) -> np.ndarray
                         emb = self.manager.embed(t)
                     except Exception:
                         try:
-                            # or manager.embed(list)->list
                             emb = self.manager.embed([t])[0]
                         except Exception as e:
                             logger.exception("faiss_manager.embed failed for text snippet: %s", e)
@@ -738,7 +754,6 @@ def create_app() -> FastAPI:
                 norms = np.linalg.norm(arr, axis=1, keepdims=True) + 1e-12
                 return arr / norms
 
-        # Use faiss_manager stored on app.state if present (safer)
         manager_for_embed = getattr(app.state, "faiss_manager", None)
         if manager_for_embed is not None:
             app.state.embedding_model = FAISSManagerEmbeddingWrapper(manager_for_embed)
@@ -769,26 +784,18 @@ def create_app() -> FastAPI:
         - fallback to reading storage/documents.json
         """
         try:
-            # 1) Prefer retriever.documents if present
             retriever = getattr(app.state, "retriever", None)
             if retriever and getattr(retriever, "documents", None):
                 return {"status": "ok", "loaded_docs": len(retriever.documents)}
-
-            # 2) Fall back to faiss_manager id_map
             faiss_manager = getattr(app.state, "faiss_manager", None)
             if faiss_manager and getattr(faiss_manager, "id_map", None):
                 return {"status": "ok", "loaded_docs": len(faiss_manager.id_map)}
-
-            # 3) Fall back to reading storage/documents.json directly
             docs_path = Path(os.getenv("DOCUMENTS_JSON", Path("storage") / "documents.json"))
             if docs_path.exists():
                 with open(docs_path, "r", encoding="utf-8") as f:
                     loaded = json.load(f)
-                # normalize list or dict
                 count = len(loaded) if isinstance(loaded, list) else len(list(loaded.values()))
                 return {"status": "ok", "loaded_docs": int(count)}
-
-            # No data found
             return {"status": "ok", "loaded_docs": 0}
         except Exception as e:
             logger.exception("Health check failed: %s", e)
@@ -801,23 +808,21 @@ def create_app() -> FastAPI:
             data = generate_latest()
             return JSONResponse(content=data, media_type=CONTENT_TYPE_LATEST)
 
-    # Core search endpoint
+    # Core search endpoint (keeps your original implementation)
     @app.post("/v1/search", response_model=SearchResponse)
     async def search(req: QueryRequest, background_tasks: BackgroundTasks, request: Request):
         start = time.time()
         if PROMETHEUS_AVAILABLE:
             SEARCH_COUNTER.inc()
 
-        # Ensure embedding model exists; prefer faiss_manager-backed wrapper if available
+        # Ensure embedding model exists
         try:
             if not getattr(app.state, "embedding_model", None):
                 manager_for_embed = getattr(app.state, "faiss_manager", None)
                 if manager_for_embed is not None:
-                    # create and attach wrapper once
                     class FAISSManagerEmbeddingWrapperLocal(EmbeddingModel):
                         def __init__(self, manager):
                             self.manager = manager
-
                         async def embed(self, texts):
                             vecs = []
                             for t in texts:
@@ -832,7 +837,6 @@ def create_app() -> FastAPI:
                             arr = np.vstack(vecs)
                             norms = np.linalg.norm(arr, axis=1, keepdims=True) + 1e-12
                             return arr / norms
-
                     app.state.embedding_model = FAISSManagerEmbeddingWrapperLocal(manager_for_embed)
                     logger.debug("Attached FAISSManagerEmbeddingWrapperLocal on-demand in search")
                 else:
@@ -840,10 +844,9 @@ def create_app() -> FastAPI:
                     logger.debug("Attached DummyEmbeddingModel on-demand in search")
         except Exception as e:
             logger.exception("Failed to ensure embedding_model exists: %s", e)
-            # final fallback
             app.state.embedding_model = DummyEmbeddingModel(dim=EMBEDDING_DIM)
 
-        # Cache key and early return if cached
+        # caching
         cache_key = f"q:{req.query}|k:{req.top_k}|f:{json.dumps(req.filters, sort_keys=True)}|r:{req.use_rerank}"
         cached = await app.state.cache.get(cache_key) if app.state.cache else None
         if cached:
@@ -852,26 +855,22 @@ def create_app() -> FastAPI:
         emb_model: EmbeddingModel = app.state.embedding_model
         retriever: RetrieverIndex = app.state.retriever
 
-        # Ensure retriever exists
         if retriever is None:
-            # create a minimal retriever to avoid crash
             retriever = RetrieverIndex(FAISS_INDEX_PATH, DOCUMENTS_PATH, EMBEDDING_DIM)
             retriever.documents = {}
             retriever.index = None
             retriever.id_map = []
             app.state.retriever = retriever
 
-        # Embed query
         q_vec = await emb_model.embed([req.query])  # (1, D)
 
-        # --- Ensure retriever has a usable FAISS index at search time (fix TestClient visibility) ---
+        # Defensive FAISS attach at search time
         if getattr(retriever, "index", None) is None:
             fm = getattr(app.state, "faiss_manager", None)
             if fm is not None and getattr(fm, "index", None) is not None:
                 retriever.index = fm.index
                 logger.info("Attached faiss_manager.index to retriever at search time.")
 
-        # --- DEBUG & defensively attach the FAISS index (paste into search before raw_results) ---
         try:
             retr = retriever
             fm = getattr(app.state, "faiss_manager", None)
@@ -882,7 +881,6 @@ def create_app() -> FastAPI:
                         "present" if fm is not None else "absent",
                         type(fidx_obj).__name__ if fidx_obj is not None else None,
                         str(FAISS_INDEX_PATH))
-            # try attach any available index sources in order
             if getattr(retr, "index", None) is None:
                 if fm is not None and getattr(fm, "index", None) is not None:
                     retr.index = fm.index
@@ -891,7 +889,6 @@ def create_app() -> FastAPI:
                     retr.index = fidx_obj
                     logger.info("SEARCH DEBUG: Attached app.state.faiss_index_object to retriever")
                 else:
-                    # try top-level disk or storage path(s)
                     for candidate in [Path("faiss.index"), FAISS_INDEX_PATH, Path("storage") / "faiss.index"]:
                         try:
                             if candidate.exists() and faiss is not None:
@@ -903,7 +900,6 @@ def create_app() -> FastAPI:
         except Exception:
             logger.exception("SEARCH DEBUG: unexpected error during defensive FAISS attach")
 
-        # Base search (retrieve extra for reranking)
         raw_results = retriever.search(q_vec, top_k=req.top_k * 5, filters=req.filters)
 
         # Optional debug dump of raw retrieval payload
@@ -914,7 +910,6 @@ def create_app() -> FastAPI:
                     "time_utc": datetime.datetime.utcnow().isoformat() + "Z",
                     "raw_results": [{"doc_id": r[0], "score": r[1]} for r in raw_results],
                 }
-                # Attach small excerpts for context
                 small_excerpts = []
                 for doc_id, sc in raw_results[: min(len(raw_results), req.top_k * 5)]:
                     doc = retriever.get(doc_id)
@@ -925,25 +920,19 @@ def create_app() -> FastAPI:
         except Exception:
             logger.exception("Failed to dump retrieval payload")
 
-        # Compose SearchResult objects (safe handling of missing docs)
         candidates: List[SearchResult] = []
-        # limit how many raw results we convert
         for doc_id, score in raw_results[: req.top_k * 10]:
             doc = retriever.get(doc_id) if doc_id else None
             excerpt = (doc.text[:300] + "...") if (doc and len(doc.text) > 300) else (doc.text if doc else None)
             metadata = doc.metadata if doc else {}
             candidates.append(SearchResult(id=doc_id or "", score=score, excerpt=excerpt, metadata=metadata))
 
-        # Prepare reranker input texts safely (only non-empty excerpts)
         reranker_input_texts = [safe_truncate(c.excerpt) for c in candidates if c.excerpt]
-        # Rerank if requested
         if req.use_rerank and app.state.reranker:
-            # If there are zero candidate texts (all empty), fallback to original score ordering
             if len(reranker_input_texts) == 0:
                 logger.warning("No candidate texts found for reranker; skipping rerank and returning original scores.")
                 candidates = sorted(candidates, key=lambda x: x.score, reverse=True)
             else:
-                # rerank expects full candidate objects; the reranker implementation uses excerpt or metadata
                 try:
                     candidates = app.state.reranker.rerank(req.query, candidates)
                 except Exception:
@@ -952,7 +941,6 @@ def create_app() -> FastAPI:
         else:
             candidates = sorted(candidates, key=lambda x: x.score, reverse=True)
 
-        # Optional debug dump of post-rerank payload
         try:
             if DEBUG_ENABLED:
                 payload = {
@@ -964,12 +952,10 @@ def create_app() -> FastAPI:
         except Exception:
             logger.exception("Failed to dump post-rerank payload")
 
-        # Trim to top_k
         final = candidates[: req.top_k]
         took = (time.time() - start) * 1000.0
         resp = SearchResponse(query=req.query, results=final, took_ms=took)
 
-        # cache response
         if app.state.cache:
             await app.state.cache.set(cache_key, resp)
 
@@ -982,23 +968,178 @@ def create_app() -> FastAPI:
             raise HTTPException(status_code=404, detail="Document not found")
         return doc
 
-    # Reindex endpoint (background task)
+    # ---------------------------
+    # Synchronous Reindex endpoint (scans uploads/ and ingests PDFs)
+    # ---------------------------
     @app.post("/v1/reindex")
-    async def reindex(background_tasks: BackgroundTasks):
-        # In production, this should kick off a job that rebuilds the index and swaps atomically
-        background_tasks.add_task(_reindex_job, app)
-        return {"status": "reindex_started"}
+    async def reindex_sync():
+        """
+        Synchronous reindex:
+         - scan ./uploads for *.pdf
+         - extract text (skips unreadable PDFs)
+         - writes storage/documents.json (backed up)
+         - generates embeddings via app.state.embedding_model (awaited)
+         - builds FAISS index (if faiss available) and writes to FAISS_INDEX_PATH
+        """
+        logger.info("reindex_sync called (synchronous).")
+        uploads_dir = Path("uploads")
+        uploads_dir.mkdir(parents=True, exist_ok=True)
+        DATA_DIR.mkdir(parents=True, exist_ok=True)
 
-    async def _reindex_job(app: FastAPI):
-        logger.info("Starting reindex job...")
+        pdf_files = sorted(uploads_dir.glob("*.pdf"))
+        if not pdf_files:
+            return JSONResponse({"status": "no_pdfs_found", "pdfs_found": 0})
+
+        # Backup existing artifacts
+        make_backup(DOCUMENTS_PATH)
+        make_backup(FAISS_INDEX_PATH)
+
+        docs_to_write = []
+        texts_for_embed = []
+        filenames = []
+
+        for pdf in pdf_files:
+            logger.info("Processing PDF: %s", pdf)
+            txt = extract_text_from_pdf_file(pdf)
+            if not txt:
+                logger.warning("No selectable text extracted from %s; skipping.", pdf.name)
+                continue
+            doc_id = str(uuid.uuid4())
+            doc_obj = {"id": doc_id, "text": txt, "metadata": {"filename": pdf.name, "source": "uploads"}}
+            docs_to_write.append(doc_obj)
+            texts_for_embed.append(txt)
+            filenames.append(pdf.name)
+
+        if not docs_to_write:
+            return JSONResponse({"status": "no_readable_pdfs", "pdfs_found": len(pdf_files), "docs_ingested": 0})
+
+        # Save documents.json (overwrites by design; this mirrors prior behavior)
         try:
-            # naive re-load: replace with your reindex pipeline
-            new_index = RetrieverIndex(FAISS_INDEX_PATH, DOCUMENTS_PATH, EMBEDDING_DIM)
-            new_index.load()
-            app.state.retriever = new_index
-            logger.info("Reindex complete. Documents: %d", len(new_index.documents))
+            write_documents_json(docs_to_write, DOCUMENTS_PATH)
+            logger.info("Wrote documents.json with %d docs", len(docs_to_write))
         except Exception as e:
-            logger.exception("Reindex failed: %s", e)
+            logger.exception("Failed to write documents.json: %s", e)
+            raise HTTPException(status_code=500, detail=f"Failed to write documents.json: {e}")
+
+        # Embedding step (await the app.state.embedding_model)
+        embedding_model = getattr(app.state, "embedding_model", None)
+        embeddings_tuples = []
+        try:
+            if embedding_model is not None:
+                vectors = await embedding_model.embed(texts_for_embed)  # (N, D)
+                # ensure correct shape
+                if isinstance(vectors, np.ndarray):
+                    for i, doc in enumerate(docs_to_write):
+                        vec = vectors[i]
+                        embeddings_tuples.append((doc["id"], vec))
+                else:
+                    # assume list of vectors
+                    for i, doc in enumerate(docs_to_write):
+                        embeddings_tuples.append((doc["id"], np.asarray(vectors[i], dtype=np.float32)))
+                logger.info("Generated embeddings for %d docs", len(embeddings_tuples))
+            else:
+                logger.warning("No embedding_model available; using dummy vectors.")
+                for doc in docs_to_write:
+                    embeddings_tuples.append((doc["id"], np.zeros((EMBEDDING_DIM,), dtype=np.float32)))
+        except Exception:
+            logger.exception("Embedding step failed; will continue and write debug embeddings.")
+            for doc in docs_to_write:
+                embeddings_tuples.append((doc["id"], np.zeros((EMBEDDING_DIM,), dtype=np.float32)))
+
+        # Build FAISS index from embeddings
+        id_map = build_faiss_from_embeddings(embeddings_tuples, FAISS_INDEX_PATH, EMBEDDING_DIM)
+
+        # Attach new retriever
+        try:
+            new_retriever = RetrieverIndex(FAISS_INDEX_PATH, DOCUMENTS_PATH, EMBEDDING_DIM)
+            new_retriever.load()
+            app.state.retriever = new_retriever
+            logger.info("Reindex complete. Documents: %d", len(new_retriever.documents))
+        except Exception:
+            logger.exception("Failed to load retriever after reindex; attempting light-weight attach.")
+            # light-weight attach
+            r = RetrieverIndex(FAISS_INDEX_PATH, DOCUMENTS_PATH, EMBEDDING_DIM)
+            r.documents = {d["id"]: Document(id=d["id"], text=d["text"], metadata=d.get("metadata", {})) for d in docs_to_write}
+            r.id_map = [d["id"] for d in docs_to_write]
+            app.state.retriever = r
+
+        return {"status": "success", "pdfs_found": len(pdf_files), "docs_ingested": len(docs_to_write), "id_map_len": len(id_map)}
+
+    # ---------------------------
+    # Ingest single uploaded file (Swagger-friendly)
+    # ---------------------------
+    @app.post("/v1/ingest")
+    async def ingest_file(file: UploadFile = File(...)):
+        """
+        Upload single PDF via Swagger UI. Saves to uploads/, extracts text, appends to documents.json,
+        generates embedding for the new doc and updates FAISS (best-effort).
+        """
+        uploads_dir = Path("uploads")
+        uploads_dir.mkdir(parents=True, exist_ok=True)
+        DATA_DIR.mkdir(parents=True, exist_ok=True)
+
+        target = uploads_dir / file.filename
+        try:
+            with target.open("wb") as f:
+                content = await file.read()
+                f.write(content)
+            logger.info("Saved uploaded file: %s", target)
+        except Exception as e:
+            logger.exception("Failed saving uploaded file: %s", e)
+            raise HTTPException(status_code=500, detail=f"Failed to save file: {e}")
+
+        text = extract_text_from_pdf_file(target)
+        if not text:
+            raise HTTPException(status_code=400, detail="Uploaded PDF contains no selectable text (scanned/empty)")
+
+        # load existing docs, append
+        existing = load_documents_json(DOCUMENTS_PATH)
+        new_id = str(uuid.uuid4())
+        new_doc = {"id": new_id, "text": text, "metadata": {"filename": target.name, "source": "ingest_upload"}}
+        existing.append(new_doc)
+
+        # backup & write documents.json
+        make_backup(DOCUMENTS_PATH)
+        try:
+            write_documents_json(existing, DOCUMENTS_PATH)
+            logger.info("Appended new doc and saved documents.json (total=%d)", len(existing))
+        except Exception as e:
+            logger.exception("Failed to save documents.json after ingest: %s", e)
+            raise HTTPException(status_code=500, detail=f"Failed to save documents.json: {e}")
+
+        # embed new doc and update FAISS (we rebuild entire index here for simplicity)
+        try:
+            embedding_model = getattr(app.state, "embedding_model", None)
+            vec = None
+            if embedding_model:
+                vecs = await embedding_model.embed([text])
+                vec = np.asarray(vecs[0], dtype=np.float32)
+            else:
+                vec = np.zeros((EMBEDDING_DIM,), dtype=np.float32)
+            # build full set of embeddings (recompute for all docs for correctness)
+            all_texts = [d["text"] for d in existing]
+            emodel = getattr(app.state, "embedding_model", None)
+            embeddings_tuples = []
+            if emodel:
+                all_vecs = await emodel.embed(all_texts)
+                for i, d in enumerate(existing):
+                    embeddings_tuples.append((d["id"], all_vecs[i]))
+            else:
+                for d in existing:
+                    embeddings_tuples.append((d["id"], np.zeros((EMBEDDING_DIM,), dtype=np.float32)))
+
+            build_faiss_from_embeddings(embeddings_tuples, FAISS_INDEX_PATH, EMBEDDING_DIM)
+            # reload retriever
+            try:
+                new_r = RetrieverIndex(FAISS_INDEX_PATH, DOCUMENTS_PATH, EMBEDDING_DIM)
+                new_r.load()
+                app.state.retriever = new_r
+            except Exception:
+                logger.exception("Failed to reload retriever after ingest update.")
+        except Exception:
+            logger.exception("Embedding/FAISS update after ingest failed (non-fatal).")
+
+        return {"status": "uploaded_and_ingested", "doc_id": new_id, "filename": target.name}
 
     return app
 
@@ -1011,7 +1152,7 @@ if __name__ == "__main__":
     import uvicorn
 
     uvicorn.run(
-        "retriever_api:app",
+        "api.retriever_api:app",
         host=os.getenv("HOST", "0.0.0.0"),
         port=int(os.getenv("PORT", "8000")),
         reload=os.getenv("DEV_RELOAD", "false").lower() in ("1", "true"),

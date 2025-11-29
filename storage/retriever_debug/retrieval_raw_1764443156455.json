@@ -1,0 +1,56 @@
+{
+  "query": "information retrieval",
+  "time_utc": "2025-11-29T19:05:56.455755Z",
+  "raw_results": [
+    {
+      "doc_id": "2716e296-c928-48c1-bad9-5de30969e640",
+      "score": 0.5039522051811218
+    },
+    {
+      "doc_id": "10596c01-2445-44ab-af4c-936ea4a189e8",
+      "score": 0.29785358905792236
+    },
+    {
+      "doc_id": "bbd6e644-a0ed-4380-9280-e20f76d41d45",
+      "score": 0.27157407999038696
+    },
+    {
+      "doc_id": "ee63a4a7-d50f-4b71-9e20-8061450d6e0c",
+      "score": 0.2560321092605591
+    },
+    {
+      "doc_id": "602b3b1f-51f2-4581-a725-9eafbcdd9e09",
+      "score": 0.1609717607498169
+    },
+    {
+      "doc_id": "74551c6b-faf3-4e01-b8db-47ede560de55",
+      "score": 0.09554505348205566
+    }
+  ],
+  "excerpts": [
+    {
+      "doc_id": "2716e296-c928-48c1-bad9-5de30969e640",
+      "excerpt": "Perspective\nSearch still matters: information retrieval in the era of \ngenerative AI\nWilliam Hersh \n , MD\n�\nDepartment of Medical Informatics & Clinical Epidemiology, School of Medicine, Oregon Health & Science University, Portland, OR 97239, \nUnited States\n�\nCorresponding author: William Hersh, MD, Department of Medical Informatics & Clinical Epidemiology, School of Medicine, Oregon Health & Science \nUniversity, BICC, 3181 SW Sam Jackson Park Rd., Portland, OR 97239, United States ( hersh@ohsu.edu )\nAbstract \nObjective: Information retrieval (IR, also known as search) systems are ubiquitous in modern times. How does the emergence of generative \nartificial intelligence (AI), based on large language models (LLMs), fit into the IR process?\nProcess: This perspective explores the use of generative AI in the context of the motivations, considerations, and outcomes of the IR process \nwith a focus on the academic use of such systems.\nConclusions: There are many information needs, from simple to complex, that motivat..."
+    },
+    {
+      "doc_id": "10596c01-2445-44ab-af4c-936ea4a189e8",
+      "excerpt": "National Strategy for Artificial Intelligence \n \n2 \n \n \n \n \n \n \n \n \n \n \n \n \n \n \n \n \n \n \nThis page has been intentionally left blank \n \n \n \n \n \n \n \n  \n \nNational Strategy for Artificial Intelligence \n \n3 \n \n \n \n \n \n \n \n \n \n \n \n \n \n \n \n \n \n \n \n \n \n \n \n \nAcknowledgments \n \nIn writing this Report, Arnab Kumar , Punit Shukla, Aalekh Sharan and Tanay Mahindru of NITI Aayog \nhave made valuable contributions. \nInputs were also provided by Dr. Avik Sarkar, Dr. Ashish Nayan and Kartikeya Asthana of NITI Aayog. \nThe valuable contributions of Mr. P. Anan dan and his team from Wadhwani Institute for AI, Dr.  Manish \nGupta of Videoken, Prof. Ramesh Raskar of MIT Media Labs, nVIDIA, Intel, IBM, NASSCOM, McKinsey \nand Accenture are also thankfully acknowledged. Special contribution of Accenture in the production of \nthis report is also acknowledged. \n \n \nAnna Roy \nAdvisor (Industry) \nNITI Aayog \n  \n\n \nNational Strategy for Artificial Intelligence \n \n4 \n \n Contents  \nINTRODUCTION 5 \nEXECUTIVE SUMMARY 7 \nWHAT IS ARTIFICIAL INT..."
+    },
+    {
+      "doc_id": "bbd6e644-a0ed-4380-9280-e20f76d41d45",
+      "excerpt": "OECD ARTIFICIAL \nINTELLIGENCE PAPERS\nOctober 2023  No. 3\nTHE STATE OF \nIMPLEMENTATION \nOF THE OECD AI \nPRINCIPLES FOUR \nYEARS ON\n2    THE STATE OF IMPLEMENTATION OF THE OECD AI PRINCIPLES FOUR YEARS ON \nOECD ARTIFICIAL INTELLIGENCE PAPERS \n  \nThis report was approved and declassified by written procedure by the Committee on Digital Economy \nPolicy on 31 August 2023 and prepared for publication by the OECD Secretariat. For more information, \nplease visit www.oecd.ai.  \n \nNote to Delegations: This document is also available on O.N.E. under the reference code: \nDSTI/CDEP/AIGO(2023)5/FINAL \n \nThis document, as well as any data and any map included herein, are without prejudice to the status of or \nsovereignty over any territory, to the delimitation of international frontiers and boundaries and to the name \nof any territory, city or area.  \nThe statistical data for Israel are supplied by and under the responsibility of the relevant Israeli authorities. \nThe use of such data by the OECD is without prejudice to the..."
+    },
+    {
+      "doc_id": "ee63a4a7-d50f-4b71-9e20-8061450d6e0c",
+      "excerpt": "Provided proper attribution is provided, Google hereby grants permission to\nreproduce the tables and figures in this paper solely for use in journalistic or\nscholarly works.\nAttention Is All You Need\nAshish Vaswani∗\nGoogle Brain\navaswani@google.com\nNoam Shazeer∗\nGoogle Brain\nnoam@google.com\nNiki Parmar∗\nGoogle Research\nnikip@google.com\nJakob Uszkoreit∗\nGoogle Research\nusz@google.com\nLlion Jones∗\nGoogle Research\nllion@google.com\nAidan N. Gomez∗ †\nUniversity of Toronto\naidan@cs.toronto.edu\nŁukasz Kaiser∗\nGoogle Brain\nlukaszkaiser@google.com\nIllia Polosukhin∗ ‡\nillia.polosukhin@gmail.com\nAbstract\nThe dominant sequence transduction models are based on complex recurrent or\nconvolutional neural networks that include an encoder and a decoder. The best\nperforming models also connect the encoder and decoder through an attention\nmechanism. We propose a new simple network architecture, the Transformer,\nbased solely on attention mechanisms, dispensing with recurrence and convolutions\nentirely. Experiments on two machine ..."
+    },
+    {
+      "doc_id": "602b3b1f-51f2-4581-a725-9eafbcdd9e09",
+      "excerpt": "Data residency, \noperational \ntransparency,  \nand privacy for \nEuropean customers \non Google Cloud\nGoogle Cloud Whitepaper \nFebruary 2020\nThe information contained herein is intended to outline general product direction and should not be relied upon in making \npurchasing decisions nor shall it be used to trade in the securities of Alphabet Inc. The content is for informational purposes only \nand may not be incorporated into any contract. The information presented is not a commitment, promise, or legal obligation to \ndeliver any material, code or functionality. Any references to the development, release, and timing of any features or functionality \ndescribed for these services remains at Google’s sole discretion. Product capabilities, timeframes and features are subject to \nchange and should not be viewed as Google commitments.\n\n2\nIntroduction\nAt Google Cloud, the privacy and security of customer data underpins the design of all of the services \nthat we offer. We recognize that our global customers have specif..."
+    },
+    {
+      "doc_id": "74551c6b-faf3-4e01-b8db-47ede560de55",
+      "excerpt": "Classical Waterfall Model The classical waterfall model is a sequential software development process\nwhere progress flows in one direction: requirements → design → implementation → testing →\ndeployment → maintenance. Key Characteristics: - Linear, phase-based approach -\nDocumentation-heavy - No feedback loops between phases - Best suited for well-understood, stable\nrequirements Common Uses: - Military systems - Manufacturing - Large enterprise systems with fixed\nrequirements"
+    }
+  ]
+}

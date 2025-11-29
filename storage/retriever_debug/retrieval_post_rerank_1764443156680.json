@@ -1,0 +1,21 @@
+{
+  "query": "information retrieval",
+  "time_utc": "2025-11-29T19:05:56.680731Z",
+  "post_rerank": [
+    {
+      "doc_id": "2716e296-c928-48c1-bad9-5de30969e640",
+      "score": 4.095328330993652,
+      "excerpt": "Perspective\nSearch still matters: information retrieval in the era of \ngenerative AI\nWilliam Hersh \n , MD\n�\nDepartment of Medical Informatics & Clinical Epidemiology, School of Medicine, Oregon Health & Science University, Portland, OR 97239, \nUnited States\n�\nCorresponding author: William Hersh, MD,..."
+    },
+    {
+      "doc_id": "602b3b1f-51f2-4581-a725-9eafbcdd9e09",
+      "score": -9.325838088989258,
+      "excerpt": "Data residency, \noperational \ntransparency,  \nand privacy for \nEuropean customers \non Google Cloud\nGoogle Cloud Whitepaper \nFebruary 2020\nThe information contained herein is intended to outline general product direction and should not be relied upon in making \npurchasing decisions nor shall it be us..."
+    },
+    {
+      "doc_id": "ee63a4a7-d50f-4b71-9e20-8061450d6e0c",
+      "score": -10.668123245239258,
+      "excerpt": "Provided proper attribution is provided, Google hereby grants permission to\nreproduce the tables and figures in this paper solely for use in journalistic or\nscholarly works.\nAttention Is All You Need\nAshish Vaswani∗\nGoogle Brain\navaswani@google.com\nNoam Shazeer∗\nGoogle Brain\nnoam@google.com\nNiki Par..."
+    }
+  ]
+}

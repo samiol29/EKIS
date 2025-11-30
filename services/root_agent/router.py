@@ -35,7 +35,9 @@ def route_intent(intent: str, entities: dict, user_id: str, raw_text: str):
             filtered_results = search_out.get("results", [])
 
         # now compose answer using filtered list
-        written = writer_agent.compose(query, filtered_results)
+        # pass memory context (if any) to writer_agent
+        memory_context = entities.get("memory", "")
+        written = writer_agent.compose(query, filtered_results, memory=memory_context)
         # combine into structured response
         return {
             "query": query,
@@ -43,6 +45,7 @@ def route_intent(intent: str, entities: dict, user_id: str, raw_text: str):
             "filtered_results_count": len(filtered_results),
             "answer": written.get("answer")
         }
+
 
 
     if intent == "list_documents":

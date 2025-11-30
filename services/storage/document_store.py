@@ -66,8 +66,16 @@ class DocumentStore:
         self.save()
         return doc_id
 
-    def get_document(self, doc_id: str) -> Optional[Dict[str, Any]]:
-        return self.documents.get(doc_id)
+def get_document(self, doc_id: str) -> dict:
+    # existing lookup (adjust to your implementation)
+    doc = self._docs_by_id.get(doc_id)  # or however you store docs
+    if not doc:
+        return {}
+    # ensure text key exists
+    text = doc.get("text") or doc.get("content") or ""
+    filename = doc.get("filename") or doc.get("id") or None
+    metadata = doc.get("metadata") or {}
+    return {"id": doc_id, "text": text, "filename": filename, "metadata": metadata}
 
     def all_documents(self) -> List[Dict[str, Any]]:
         """

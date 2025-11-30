@@ -1,0 +1,54 @@
+{
+  "sessions": {
+    "demo": [
+      {
+        "user": "demo_user",
+        "text": "Hi, I'm Sam and I live in Bangalore"
+      },
+      {
+        "user": "demo_user",
+        "text": "information retrieval"
+      },
+      {
+        "user": "demo_user",
+        "text": "Hi, I'm Sam and I live in Bangalore"
+      },
+      {
+        "user": "demo_user",
+        "text": "information retrieval"
+      },
+      {
+        "user": "demo_user",
+        "text": "information retrieval"
+      },
+      {
+        "user": "demo_user",
+        "text": "information retrieval"
+      },
+      {
+        "user": "demo_user",
+        "text": "information retrieval"
+      },
+      {
+        "user": "demo_user",
+        "text": "information retrieval"
+      },
+      {
+        "user": "demo_user",
+        "text": "information retrieval"
+      },
+      {
+        "user": "demo_user",
+        "text": "information retrieval"
+      }
+    ]
+  },
+  "users": {
+    "demo_user": {
+      "facts": {
+        "fact_1": "Sam and I live in Bangalore",
+        "location": "Bangalore"
+      }
+    }
+  }
+}

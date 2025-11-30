@@ -18,3 +18,13 @@ __pycache__/
 *.log
 adk_state/
 venv/
+
+# Local artifacts
+/storage/faiss.index
+/storage/embeddings.npy
+/storage/id_map.json
+/storage/backups/
+storage/retriever_debug/
+venv/
+__pycache__/
+*.pyc

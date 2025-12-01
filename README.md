@@ -70,7 +70,7 @@ To overcome Cloud Run/Vertex AI startup timeouts (Code 3 Errors), we implemented
 
 ### **Visual Proof: The Knowledge Map**
 We validated the system's understanding by projecting 768-dimensional document embeddings into 2D space using PCA.
-![PCA Knowledge Map](path/to/pca_chart.png)
+![PCA Knowledge Map](![alt text](pca.png))
 *Figure 1: Clusters show clear semantic separation between Policy Documents (left) and Technical Architectures (right), proving the "Hybrid Brain" effectively categorizes knowledge.*
 
 ### **Automated Compliance Testing**

@@ -7,9 +7,6 @@
 ![FastAPI](https://img.shields.io/badge/Backend-FastAPI-009688?logo=fastapi)
 ![Vertex AI](https://img.shields.io/badge/Cloud-Vertex_AI-yellow?logo=googlecloud)
 
-![EKIS Thumbnail](path/to/your/thumbnail_image.png)
-*(Replace with your project thumbnail)*
-
 ---
 
 ## 📖 Executive Summary
@@ -95,19 +92,24 @@ cd system-1
 pip install -r requirements.txt
 uvicorn main:app --reload --port 8000
 # Endpoint active at http://localhost:8000/docs
+```
 
 ### **Running System B (Agentic Cloud)**
 Open the Jupyter Notebook in Kaggle or Vertex AI Workbench.
-Add Secrets: Set GOOGLE_API_KEY.
-Run Pipeline: Execute the SequentialAgent setup cells.
-Launch UI: Run the final cell to start the Gradio Interactive Chat.
+1. Add Secrets: Set GOOGLE_API_KEY.
+2. Run Pipeline: Execute the SequentialAgent setup cells.
+3. Launch UI: Run the final cell to start the Gradio Interactive Chat.
 
-Python
+```python
+# just run all the cells from top to bottom in order
 # The Core Pipeline Logic
 pipeline = SequentialAgent(
     name="EKIS_Orchestrator",
     sub_agents=[guard_agent, retriever_agent, writer_agent]
 )
+```
 
 ## **🌟 Impact Statement**
 EKIS transforms the enterprise knowledge landscape. By combining the speed of System A with the reasoning of System B, we provide a roadmap to recapture the 20% of productivity lost to information hunting. It turns the "Full Day" wasted on search into a full day of innovation.
+
+Developed as a Capstone Project for the Google 5 Day AI Agents Intensive.
